@@ -13,10 +13,23 @@ from contextualized_topic_models.utils.data_preparation import TopicModelDataPre
 from contextualized_topic_models.utils.preprocessing import WhiteSpacePreprocessing
 from sklearn.feature_extraction.text import CountVectorizer
 from yaml import parse
+import json
 
 from src.data_utils.data_reader import load_wow_episodes
 from src.data_utils.cmu_dog_reader import load_cmu_episodes
 
+
+def load_mlqa_docs(data_path, languages):
+    documents = []
+    if "french" in languages:
+        documents += json.load(open(os.path.join(data_path, "fr.json"), "r"))
+    if "vietnamese" in languages:
+        documents += json.load(open(os.path.join(data_path, "vi.json"), "r"))
+    if "english" in languages:
+        documents += json.load(open(os.path.join(data_path, "en.json"), "r"))
+    if "chinese" in languages:
+        documents += json.load(open(os.path.join(data_path, "zh.json"), "r"))
+    return documents
 
 class Preprocessing(WhiteSpacePreprocessing):
     """
@@ -35,7 +48,7 @@ class Preprocessing(WhiteSpacePreprocessing):
 
         vectorizer = CountVectorizer(max_features=self.vocabulary_size, token_pattern=r'\b[a-zA-Z]{2,}\b')
         vectorizer.fit_transform(preprocessed_docs_tmp)
-        vocabulary = set(vectorizer.get_feature_names())
+        vocabulary = set(vectorizer.get_feature_names_out())
         preprocessed_docs_tmp = [' '.join([w for w in doc.split() if w in vocabulary])
                                  for doc in preprocessed_docs_tmp]
 
@@ -83,8 +96,10 @@ class DataPreparation(TopicModelDataPreparation):
             warnings.simplefilter('always', DeprecationWarning)
             warnings.warn("The method did not have in input the text_for_bow parameter. This IS EXPECTED if you are using ZeroShotTM in a cross-lingual setting")
             test_bow_embeddings = scipy.sparse.csr_matrix(np.zeros((len(text_for_contextual), 20000)))
-        test_contextualized_embeddings = bert_embeddings_from_list(text_for_contextual, self.contextualized_model, batch_size=100)
+        
+        test_contextualized_embeddings = bert_embeddings_from_list(text_for_contextual, self.contextualized_model, batch_size=100, max_seq_length=512)
         return CTMDataset(test_contextualized_embeddings, test_bow_embeddings, self.id2token)
+    
     def create_training_set(self, text_for_contextual, text_for_bow):
 
         if self.contextualized_model is None:
@@ -94,29 +109,36 @@ class DataPreparation(TopicModelDataPreparation):
         self.vectorizer = CountVectorizer()
 
         train_bow_embeddings = self.vectorizer.fit_transform(text_for_bow)
-        train_contextualized_embeddings = bert_embeddings_from_list(text_for_contextual, self.contextualized_model)
+        print(self.contextualized_model)
+        breakpoint()
+        train_contextualized_embeddings = bert_embeddings_from_list(text_for_contextual, self.contextualized_model, max_seq_length=512)
         self.vocab = self.vectorizer.get_feature_names()
         self.id2token = {k: v for k, v in zip(range(0, len(self.vocab)), self.vocab)}
 
         return CTMDataset(train_contextualized_embeddings, train_bow_embeddings, self.id2token)
 
 
-def load_and_infer_docs(data_file, vocab_file, data_preparation_file, sbert_name, model_path_prefix, output_path, onehot=True):
+def load_and_infer_docs(data_file, vocab_file, data_preparation_file, sbert_name, model_path_prefix, output_path, onehot=True, use_mlqa=False, languages=[]):
     # get topic distribution over text dataset
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    documents = [line.strip() for line in open(data_file, encoding="utf-8").readlines()]
+    if use_mlqa:
+        documents = load_mlqa_docs(languages)
+    else:
+        documents = [line.strip() for line in open(data_file, encoding="utf-8").readlines()]
     print(len(documents))
     with open(vocab_file, 'rb') as f:
         vocab = pkl.load(f)
     sp = Preprocessing(documents, "english", vocabulary_size=20000)
     preprocessed_documents_for_bow, unpreprocessed_corpus_for_contextual, _ = sp.preprocess_test(documents, vocab)
+    os.makedirs(os.path.dirname(vocab_file), exist_ok=True)
     with open(data_preparation_file, 'rb') as f:
         tp = pkl.load(f)
     tp.contextualized_model = sbert_name
     testing_dataset = tp.transform(unpreprocessed_corpus_for_contextual, preprocessed_documents_for_bow)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path + '.pkl', 'wb') as f:
         pkl.dump(testing_dataset, f)
-    for n_comp in [4, 8, 16]:
+    for n_comp in [18, 9]:
         print(n_comp)
         ctm = CombinedTM(bow_size=20000, contextual_size=768, num_epochs=50, n_components=n_comp)
         ctm.load(model_path_prefix + str(n_comp), epoch=49)
@@ -128,12 +150,12 @@ def load_and_infer_docs(data_file, vocab_file, data_preparation_file, sbert_name
         # ensure there's existing folder to save the results
         save_folder = "/".join(save_path.split("/")[:-1])
         os.makedirs(save_folder, exist_ok=True)
-
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
         with open(save_path, 'wb') as f:
             np.save(f, predictions)
 
 
-def load_and_infer_dialogue(dataset, split, vocab_file, data_preparation_file, sbert_name, model_path_prefix, output_path, onehot=False, add_response=True):
+def load_and_infer_dialogue(dataset, split, vocab_file, data_preparation_file, sbert_name, model_path_prefix, output_path, onehot=False, add_response=True, use_mlqa=False, languages=[]):
     # get topic distribution over dialogue history
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     if dataset == "wow":
@@ -144,13 +166,14 @@ def load_and_infer_dialogue(dataset, split, vocab_file, data_preparation_file, s
         raise NotImplementedError
     contexts = []
     for episode in episodes:
-        if add_response:
-            episode['text'].append(episode['response'])
+        # if add_response:
+        #     episode['text'].append(episode['response'])
 
-        tmp = ' '.join(episode['text'])
-        contexts.append(tmp)
+        # tmp = ' '.join(episode['text'])
+        contexts.append(episode['response'])
     with open(vocab_file, 'rb') as f:
         vocab = pkl.load(f)
+    breakpoint()
     sp = Preprocessing(contexts, "english", vocabulary_size=20000)
     preprocessed_documents_for_bow, unpreprocessed_corpus_for_contextual, _ = sp.preprocess_test(contexts, vocab)
     with open(data_preparation_file, 'rb') as f:
@@ -173,19 +196,25 @@ def load_and_infer_dialogue(dataset, split, vocab_file, data_preparation_file, s
             np.save(f, predictions)
 
 
-def train(data_path, vocab_path, data_preparation_file, model_path_prefix, sbert_name="sentence-transformers/stsb-roberta-base-v2"):
+
+def train(data_path, vocab_path, data_preparation_file, model_path_prefix, sbert_name="sentence-transformers/stsb-roberta-base-v2", use_mlqa=False, languages=[]):
     # train CTM on knowledge corpus
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
-    documents = [line.strip() for line in open(data_path, encoding="utf-8").readlines()]
+    if use_mlqa:
+        documents = load_mlqa_docs(data_path, languages)        
+    else:
+        documents = [line.strip() for line in open(data_path, encoding="utf-8").readlines()]
     sp = Preprocessing(documents, "english", vocabulary_size=20000)
     preprocessed_documents_for_bow, unpreprocessed_corpus_for_contextual, vocab = sp.preprocess()
+    os.makedirs(os.path.dirname(vocab_path), exist_ok=True)
     with open(vocab_path, 'wb') as f:
         pkl.dump(vocab, f)
     tp = DataPreparation(sbert_name)
     training_dataset = tp.create_training_set(unpreprocessed_corpus_for_contextual, preprocessed_documents_for_bow)
+    os.makedirs(os.path.dirname(data_preparation_file), exist_ok=True)
     with open(data_preparation_file, 'wb') as f:
         pkl.dump(tp, f)
-    for n_comp in [4, 8, 16]:
+    for n_comp in [18, 9]:
         ctm = CombinedTM(bow_size=len(tp.vocab), contextual_size=768, num_epochs=50, n_components=n_comp)
         ctm.fit(training_dataset)
         print(ctm.get_topic_lists(5))
@@ -202,6 +231,8 @@ if __name__ == "__main__":
     parser.add_argument('--do_train', action='store_true')
     parser.add_argument('--do_eval_doc', action='store_true')
     parser.add_argument('--do_eval_dial', action='store_true')
+    parser.add_argument('--use_mlqa', action='store_true')
+    parser.add_argument("-l", '--languages', nargs='+', default=["english", "chinese", "french", "vietnamese"])
 
     parser.add_argument('--dataset', help='Path to knowledge corpus', type=str, default="data/wiki_articles.txt")
     parser.add_argument('--vocab_path', help='Vocabulary path (you can also build your own vocabulary)', type=str, default="save/models/topic_models/ctm_new_vocab_20k.pkl")
@@ -210,15 +241,15 @@ if __name__ == "__main__":
     parser.add_argument('--output_path', help='Predicted topic distribution save path', type=str, required=True)
     parser.add_argument('--sbert_name', help='Name or path to sentence bert', type=str, required=False, default="sentence-transformers/stsb-roberta-base-v2")
     parser.add_argument('--onehot', help="onehot or not", type=bool, required=False)
-    parser.add_argument('--hisres', help="add response into the context for topic prediction or not", type=bool, required=False)
+    parser.add_argument('--hisres', help="add response into the context for topic prediction or not", action="store_true")
     
     args = parser.parse_args()
     if args.do_train:
-        train(args.dataset, args.vocab_path, args.data_preparation_file, args.model_path_prefix, args.sbert_name)
+        train(args.dataset, args.vocab_path, args.data_preparation_file, args.model_path_prefix, args.sbert_name, args.use_mlqa, args.languages)
     
     if args.do_eval_doc:
-        load_and_infer_docs(args.dataset, args.vocab_path, args.data_preparation_file, args.sbert_name, args.model_path_prefix, args.output_path.replace("DATASET", "wow"), args.onehot)
-        load_and_infer_docs(args.dataset.replace("wiki", "cmu"), args.vocab_path, args.data_preparation_file, args.sbert_name, args.model_path_prefix, args.output_path.replace("DATASET", "cmu"), args.onehot)
+        load_and_infer_docs(args.dataset, args.vocab_path, args.data_preparation_file, args.sbert_name, args.model_path_prefix, args.output_path.replace("DATASET", "wow"), args.onehot, args.use_mlqa, args.languages)
+        load_and_infer_docs(args.dataset.replace("wiki", "cmu"), args.vocab_path, args.data_preparation_file, args.sbert_name, args.model_path_prefix, args.output_path.replace("DATASET", "cmu"), args.onehot, args.use_mlqa, args.languages)
 
 
     if args.do_eval_dial:
@@ -226,6 +257,8 @@ if __name__ == "__main__":
             splits = ["train", "valid", "test"]
         elif args.dataset == "wow":
             splits = ["train", "valid", "valid_unseen", "test", "test_unseen"]
+        elif "mlqa" in args.dataset:
+            splits = ["train", "val"]
 
         for split in splits:
-            load_and_infer_dialogue(args.dataset, split, args.vocab_file, args.data_preparation_file, args.sbert_name, args.model_path_prefix, args.output_path, args.onehot, args.hisres)
+            load_and_infer_dialogue(args.dataset, split, args.vocab_path, args.data_preparation_file, args.sbert_name, args.model_path_prefix, args.output_path, args.onehot, args.hisres, args.use_mlqa, args.languages)

@@ -9,5 +9,5 @@ nlp==0.4.0
 nltk==3.4.5
 parlai
 matplotlib
-sklearn
-yaml
+scikit-learn
+PyYAML

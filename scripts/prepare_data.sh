@@ -1,6 +1,6 @@
 echo "Prepare WoW data..."
 
-mkdir data/wizard_of_wikipedia
+mkdir -p data/wizard_of_wikipedia
 cd data/wizard_of_wikipedia
 wget http://parl.ai/downloads/wizard_of_wikipedia/wizard_of_wikipedia.tgz
 tar zxvf wizard_of_wikipedia.tgz
