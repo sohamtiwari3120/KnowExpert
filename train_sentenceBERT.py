@@ -10,10 +10,26 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import AdamW, get_scheduler
 from sentence_transformers import SentenceTransformer
 from sentence_transformers.util import batch_to_device
+from functools import partial
 
 from src.data_utils.data_reader import load_wow_episodes
+from datasets import load_dataset, concatenate_datasets
 
 INF = 1e8
+
+def load_mlqa_dataset(languages=["french", "vietnamese"], split="train"):
+    if split not in ["train", "val"]:
+        raise Exception("Only 'train' or 'val' splits available for the MLQA dataset")
+    datasets = []
+    for language in languages:
+        if language == "french":
+            data_fp = f"./data_mlqa/splits/FrDoc2BotGeneration_{split}.json"
+        elif language == "vietnamese":
+            data_fp = f"./data_mlqa/splits/ViDoc2BotGeneration_{split}.json"
+        else:
+            raise Exception(f"{language} not supported")
+        datasets.append(load_dataset('json', data_files=data_fp)["train"])
+    return concatenate_datasets(datasets, axis=0)
 
 
 class TextDataset(Dataset):
@@ -38,15 +54,14 @@ class MLQADataset(Dataset):
     """
     Dataset to return for every index, the history only, and the history + response
     """
-    def __init__(self, split):
-        self.episodes = load_wow_episodes('./data', split, history_in_context=True, max_episode_length=1)
+    def __init__(self, split, languages):
+        self.languages = languages
+        self.hf_data = load_mlqa_dataset(languages, split)
         self.history = []
         self.hisres = []
-        for episode in self.episodes:
-            self.history.append(' '.join(episode['context']))
-            episode['context'].append(episode['response'])
-            tmp = ' '.join(episode['context'])
-            self.hisres.append(tmp)
+        for i in range(len(self.hf_data)):
+            self.history.append(self.hf_data['query'][i])
+            self.hisres.append(self.hf_data['response'][i] + " " + self.hf_data['query'][i])
 
     def __len__(self):
         return len(self.history)
@@ -63,11 +78,11 @@ def main(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     if args.use_mlqa:
+        print(f'Using MLQA dataset')
         checkpoint_name = "setu4993/LaBSE"
-        ds_class = MLQADataset
     else:
+        print(f'Using WoW dataset')
         checkpoint_name = "sentence-transformers/stsb-roberta-base-v2"
-        ds_class = TextDataset
 
     model_ref = SentenceTransformer(checkpoint_name)
     model = SentenceTransformer(checkpoint_name)
@@ -77,18 +92,21 @@ def main(args):
 
     dataloaders = {}
     if args.do_train:
-        train_dataset = ds_class(split='train')
-        breakpoint()
+        print(f"Loading train splits...")
+        train_dataset = MLQADataset('train', args.languages) if args.use_mlqa else TextDataset(split='train') 
         dataloaders["train"] = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-        valid_dataset = ds_class(split='valid')
+        print(f"Done.")
+        print(f"Loading val splits...")
+        valid_dataset = MLQADataset('val', args.languages) if args.use_mlqa else TextDataset(split='valid') 
         dataloaders["valid"] = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False)
-        valid_unseen_dataset = ds_class(split='valid_unseen')
-        dataloaders["valid_unseen"] = DataLoader(valid_unseen_dataset, batch_size=args.batch_size, shuffle=False)
-    if args.do_eval:
-        test_dataset = ds_class(split='test')
-        dataloaders["test"] = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
-        test_unseen_dataset = ds_class(split='test_unseen')
-        dataloaders["test_unseen"] = DataLoader(test_unseen_dataset, batch_size=args.batch_size, shuffle=False)
+        print(f"Done.")
+        # valid_unseen_dataset = ds_class(split='valid_unseen')
+        # dataloaders["valid_unseen"] = DataLoader(valid_unseen_dataset, batch_size=args.batch_size, shuffle=False)
+    if args.do_eval and not args.do_train:
+        print(f"Loading val splits...")
+        test_dataset = MLQADataset('val', args.languages) if args.use_mlqa else TextDataset(split='valid') 
+        dataloaders["valid"] = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+        print(f"Done.")
 
     if args.do_train:
         # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
@@ -142,12 +160,12 @@ def main(args):
                     _acc = torch.dist(pred, gold, 2) / pred.shape[0]
                     seen_acc += _acc.item()
             seen_acc /= (iteration + 1)
-            for iteration, batch in enumerate(tqdm(dataloaders["valid_unseen"])):
-                with torch.set_grad_enabled(False):
-                    gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
-                    pred = model.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
-                    _acc = torch.dist(pred, gold, 2) / pred.shape[0]
-                    unseen_acc += _acc.item()
+            # for iteration, batch in enumerate(tqdm(dataloaders["valid_unseen"])):
+            #     with torch.set_grad_enabled(False):
+            #         gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+            #         pred = model.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+            #         _acc = torch.dist(pred, gold, 2) / pred.shape[0]
+            #         unseen_acc += _acc.item()
 
             unseen_acc /= (iteration + 1)
             print(f'Epoch {e}: seen acc = {seen_acc:.4f} unseen acc = {unseen_acc:.4f}')
@@ -165,27 +183,27 @@ def main(args):
                 print(f'Best Epoch {best_epoch}: seen acc = {best_seen_acc:.4f} unseen acc = {best_unseen_acc:.4f}')
                 break
     
-    if args.do_eval:
+    if args.do_eval and not args.do_train:
         # testing
         model = SentenceTransformer(args.output_dir)
         model.eval()
         model_ref.eval()
         seen_acc, unseen_acc = 0, 0
-        for iteration, batch in enumerate(tqdm(dataloaders["test"])):
+        for iteration, batch in enumerate(tqdm(dataloaders["val"])):
             with torch.set_grad_enabled(False):
                 gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
                 pred = model.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
                 _acc = torch.dist(pred, gold, 2) / pred.shape[0]
                 seen_acc += _acc.item()
         seen_acc /= (iteration + 1)
-        for iteration, batch in enumerate(tqdm(dataloaders["test_unseen"])):
-            with torch.set_grad_enabled(False):
-                gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
-                pred = model.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
-                _acc = torch.dist(pred, gold, 2) / pred.shape[0]
-                unseen_acc += _acc.item()
-        unseen_acc /= (iteration + 1)
-        print(f'Test: seen acc = {seen_acc:.4f} unseen acc = {unseen_acc:.4f}')
+        # for iteration, batch in enumerate(tqdm(dataloaders["test_unseen"])):
+        #     with torch.set_grad_enabled(False):
+        #         gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+        #         pred = model.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+        #         _acc = torch.dist(pred, gold, 2) / pred.shape[0]
+        #         unseen_acc += _acc.item()
+        # unseen_acc /= (iteration + 1)
+        print(f'Valid: seen acc = {seen_acc:.4f}')
 
 
 if __name__ == '__main__':
@@ -202,6 +220,7 @@ if __name__ == '__main__':
     parser.add_argument('--do_train', action='store_true')
     parser.add_argument('--do_eval', action='store_true')
     parser.add_argument('--use_mlqa', action='store_true')
+    parser.add_argument("-l", '--languages', nargs='+', default=["french", "vietnamese"])
     
     args = parser.parse_args()
     main(args)

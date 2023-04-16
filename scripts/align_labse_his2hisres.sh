@@ -1,0 +1,1 @@
+python train_sentenceBERT.py -bs 8 --lr 1e-6 --wd 0 -ep 20 -pa 5 --output_dir save/models/mlqa_topic_models/french_vietnamese/his_only_labse --do_train --do_eval --use_mlqa --languages french vietnamese

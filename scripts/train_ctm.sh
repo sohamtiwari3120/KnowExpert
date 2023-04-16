@@ -3,7 +3,6 @@ use_mlqa=$1
 if [ "$use_mlqa" = "use_mlqa" ]; then
     echo "Using MLQA dataset."
     python train_ctm.py \
-    --do_train \
     --do_eval_doc \
     --use_mlqa \
     --languages french vietnamese \
@@ -13,8 +12,8 @@ if [ "$use_mlqa" = "use_mlqa" ]; then
     --model_path_prefix save/models/mlqa_topic_models/french_vietnamese/ctm_20k_topics_ \
     --output_path save/models/mlqa_topic_models/french_vietnamese/ctm_20k_topics_NCLUSTER/DATASET_ctm_20k_topics_ \
     --sbert_name setu4993/LaBSE
-    # echo "Doing eval_doc"
-    echo "Doing both train; eval_doc"
+    echo "Doing eval_doc"
+    # echo "Doing both train; eval_doc"
 
 # save/models/topic_models/ctm_20k_topics_4/cmu_ctm_20k_topics_4.npy
 # save/models/topic_models/ctm_20k_topics_4/wow_ctm_20k_topics_4.npy
