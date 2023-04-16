@@ -17,6 +17,9 @@ INF = 1e8
 
 
 class TextDataset(Dataset):
+    """
+    Dataset to return for every index, the history only, and the history + response
+    """
     def __init__(self, split):
         self.episodes = load_wow_episodes('./data', split, history_in_context=True, max_episode_length=1)
         self.history = []
@@ -31,6 +34,26 @@ class TextDataset(Dataset):
     def __getitem__(self, index):
         return self.history[index], self.hisres[index]
 
+class MLQADataset(Dataset):
+    """
+    Dataset to return for every index, the history only, and the history + response
+    """
+    def __init__(self, split):
+        self.episodes = load_wow_episodes('./data', split, history_in_context=True, max_episode_length=1)
+        self.history = []
+        self.hisres = []
+        for episode in self.episodes:
+            self.history.append(' '.join(episode['context']))
+            episode['context'].append(episode['response'])
+            tmp = ' '.join(episode['context'])
+            self.hisres.append(tmp)
+
+    def __len__(self):
+        return len(self.history)
+        
+    def __getitem__(self, index):
+        return self.history[index], self.hisres[index]
+
 def main(args):
     # random seed
     torch.manual_seed(777)
@@ -39,29 +62,37 @@ def main(args):
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    bert_ref = SentenceTransformer("sentence-transformers/stsb-roberta-base-v2")
-    bert = SentenceTransformer("sentence-transformers/stsb-roberta-base-v2")
+    if args.use_mlqa:
+        checkpoint_name = "setu4993/LaBSE"
+        ds_class = MLQADataset
+    else:
+        checkpoint_name = "sentence-transformers/stsb-roberta-base-v2"
+        ds_class = TextDataset
 
-    bert.to(device)
-    bert_ref.to(device)
+    model_ref = SentenceTransformer(checkpoint_name)
+    model = SentenceTransformer(checkpoint_name)
+
+    model.to(device)
+    model_ref.to(device)
 
     dataloaders = {}
     if args.do_train:
-        train_dataset = TextDataset(split='train')
+        train_dataset = ds_class(split='train')
+        breakpoint()
         dataloaders["train"] = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-        valid_dataset = TextDataset(split='valid')
+        valid_dataset = ds_class(split='valid')
         dataloaders["valid"] = DataLoader(valid_dataset, batch_size=args.batch_size, shuffle=False)
-        valid_unseen_dataset = TextDataset(split='valid_unseen')
+        valid_unseen_dataset = ds_class(split='valid_unseen')
         dataloaders["valid_unseen"] = DataLoader(valid_unseen_dataset, batch_size=args.batch_size, shuffle=False)
     if args.do_eval:
-        test_dataset = TextDataset(split='test')
+        test_dataset = ds_class(split='test')
         dataloaders["test"] = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
-        test_unseen_dataset = TextDataset(split='test_unseen')
+        test_unseen_dataset = ds_class(split='test_unseen')
         dataloaders["test_unseen"] = DataLoader(test_unseen_dataset, batch_size=args.batch_size, shuffle=False)
 
     if args.do_train:
-        # optimizer = torch.optim.Adam(bert.parameters(), lr=args.lr, weight_decay=args.wd)
-        optimizer = AdamW(bert.parameters(), lr=args.lr, weight_decay=args.wd)
+        # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
+        optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd)
         num_training_steps = args.epoch * len(dataloaders["train"])
         lr_scheduler = get_scheduler(
             "linear",
@@ -74,17 +105,17 @@ def main(args):
         patience, best_epoch = 0, -1
         for e in range(args.epoch):
             # training
-            bert.train()
-            bert_ref.eval()
+            model.train()
+            model_ref.eval()
             loss, acc = 0, 0
             for iteration, batch in enumerate(tqdm(dataloaders["train"])):
                 optimizer.zero_grad()
                 with torch.set_grad_enabled(False):
-                    gold = bert_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+                    gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
                 with torch.set_grad_enabled(True):
-                    features = bert.tokenize(batch[0])
+                    features = model.tokenize(batch[0])
                     features = batch_to_device(features, device)
-                    out_features = bert.forward(features)
+                    out_features = model.forward(features)
                     pred = out_features['sentence_embedding']
 
                     _loss = loss_fn(input=pred, target=gold)
@@ -101,20 +132,20 @@ def main(args):
             print(f'Epoch {e}: loss = {loss:.6f} acc = {acc:.4f}')
             
             # evaluation
-            bert.eval()
-            bert_ref.eval()
+            model.eval()
+            model_ref.eval()
             seen_acc, unseen_acc = 0, 0
             for iteration, batch in enumerate(tqdm(dataloaders["valid"])):
                 with torch.set_grad_enabled(False):
-                    gold = bert_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
-                    pred = bert.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+                    gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+                    pred = model.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
                     _acc = torch.dist(pred, gold, 2) / pred.shape[0]
                     seen_acc += _acc.item()
             seen_acc /= (iteration + 1)
             for iteration, batch in enumerate(tqdm(dataloaders["valid_unseen"])):
                 with torch.set_grad_enabled(False):
-                    gold = bert_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
-                    pred = bert.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+                    gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+                    pred = model.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
                     _acc = torch.dist(pred, gold, 2) / pred.shape[0]
                     unseen_acc += _acc.item()
 
@@ -125,7 +156,7 @@ def main(args):
                 best_unseen_acc = unseen_acc
                 best_epoch = e
                 patience = 0
-                bert.save(args.output_dir)
+                model.save(args.output_dir)
             else:
                 patience += 1
             
@@ -136,21 +167,21 @@ def main(args):
     
     if args.do_eval:
         # testing
-        bert = SentenceTransformer(args.output_dir)
-        bert.eval()
-        bert_ref.eval()
+        model = SentenceTransformer(args.output_dir)
+        model.eval()
+        model_ref.eval()
         seen_acc, unseen_acc = 0, 0
         for iteration, batch in enumerate(tqdm(dataloaders["test"])):
             with torch.set_grad_enabled(False):
-                gold = bert_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
-                pred = bert.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+                gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+                pred = model.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
                 _acc = torch.dist(pred, gold, 2) / pred.shape[0]
                 seen_acc += _acc.item()
         seen_acc /= (iteration + 1)
         for iteration, batch in enumerate(tqdm(dataloaders["test_unseen"])):
             with torch.set_grad_enabled(False):
-                gold = bert_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
-                pred = bert.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+                gold = model_ref.encode(batch[1], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
+                pred = model.encode(batch[0], show_progress_bar=False, batch_size=args.batch_size, convert_to_tensor=True)
                 _acc = torch.dist(pred, gold, 2) / pred.shape[0]
                 unseen_acc += _acc.item()
         unseen_acc /= (iteration + 1)
@@ -167,8 +198,10 @@ if __name__ == '__main__':
     parser.add_argument('-ep', '--epoch',help='Epoch', type=int, required=False, default=100)
     parser.add_argument('-pa', '--patience', help='Patience to stop training', type=int, required=False, default=5)
     parser.add_argument('--output_dir', type=str, default='save/models/sentence_bert')
+    parser.add_argument('--hf_ckpt', type=str, default='save/models/sentence_bert')
     parser.add_argument('--do_train', action='store_true')
     parser.add_argument('--do_eval', action='store_true')
+    parser.add_argument('--use_mlqa', action='store_true')
     
     args = parser.parse_args()
     main(args)
