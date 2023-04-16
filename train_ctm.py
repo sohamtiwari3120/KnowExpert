@@ -131,6 +131,7 @@ def load_and_infer_docs(data_file, vocab_file, data_preparation_file, sbert_name
         vocab = pkl.load(f)
     sp = Preprocessing(documents, "english", vocabulary_size=20000)
     preprocessed_documents_for_bow, unpreprocessed_corpus_for_contextual, _ = sp.preprocess_test(documents, vocab)
+    os.makedirs(os.path.dirname(vocab_file), exist_ok=True)
     with open(data_preparation_file, 'rb') as f:
         tp = pkl.load(f)
     tp.contextualized_model = sbert_name
@@ -177,6 +178,7 @@ def load_and_infer_dialogue(dataset, split, vocab_file, data_preparation_file, s
         contexts.append(episode['response'])
     with open(vocab_file, 'rb') as f:
         vocab = pkl.load(f)
+    breakpoint()
     sp = Preprocessing(contexts, "english", vocabulary_size=20000)
     preprocessed_documents_for_bow, unpreprocessed_corpus_for_contextual, _ = sp.preprocess_test(contexts, vocab)
     with open(data_preparation_file, 'rb') as f:
