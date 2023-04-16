@@ -74,7 +74,7 @@ def main(args):
     torch.manual_seed(777)
 
     # set device
-    os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
+    # os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     if args.use_mlqa:
