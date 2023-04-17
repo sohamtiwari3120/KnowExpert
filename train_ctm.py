@@ -14,22 +14,15 @@ from contextualized_topic_models.utils.preprocessing import WhiteSpacePreprocess
 from sklearn.feature_extraction.text import CountVectorizer
 from yaml import parse
 import json
+from datasets import concatenate_datasets
+
 
 from src.data_utils.data_reader import load_wow_episodes
+from src.utils.cluster_utils import load_mlqa_docs
 from src.data_utils.cmu_dog_reader import load_cmu_episodes
+from train_sentenceBERT import load_mlqa_dataset
 
 
-def load_mlqa_docs(data_path, languages):
-    documents = []
-    if "french" in languages:
-        documents += json.load(open(os.path.join(data_path, "fr.json"), "r"))
-    if "vietnamese" in languages:
-        documents += json.load(open(os.path.join(data_path, "vi.json"), "r"))
-    if "english" in languages:
-        documents += json.load(open(os.path.join(data_path, "en.json"), "r"))
-    if "chinese" in languages:
-        documents += json.load(open(os.path.join(data_path, "zh.json"), "r"))
-    return documents
 
 class Preprocessing(WhiteSpacePreprocessing):
     """
@@ -120,13 +113,14 @@ class DataPreparation(TopicModelDataPreparation):
 
 
 def load_and_infer_docs(data_file, vocab_file, data_preparation_file, sbert_name, model_path_prefix, output_path, onehot=True, use_mlqa=False, languages=[]):
-    # get topic distribution over text dataset
+    # get topic distribution over text dataset/ text corpus
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     if use_mlqa:
         documents = load_mlqa_docs(data_path=data_file, languages=languages)
     else:
         documents = [line.strip() for line in open(data_file, encoding="utf-8").readlines()]
     print(len(documents))
+    breakpoint()
     with open(vocab_file, 'rb') as f:
         vocab = pkl.load(f)
     sp = Preprocessing(documents, "english", vocabulary_size=20000)
@@ -165,29 +159,44 @@ def load_and_infer_dialogue(dataset, split, vocab_file, data_preparation_file, s
     os.environ["TOKENIZERS_PARALLELISM"] = "false"
     if dataset == "wow":
         episodes = load_wow_episodes('./data', split, history_in_context=True, max_episode_length=1)
+        breakpoint()
     elif dataset == "cmu_dog":
         episodes = load_cmu_episodes('./data', split)
+    elif dataset == "mlqa":
+        episodes = []
+        for lang in languages:
+            for split in ["train", "val"]:
+                episodes.append(load_mlqa_dataset([lang], split))
+        episodes = concatenate_datasets(episodes, axis=0)
     else:
         raise NotImplementedError
     contexts = []
-    for episode in episodes:
-        # if add_response:
-        #     episode['text'].append(episode['response'])
+    if use_mlqa:
+        for i in range(len(episodes)):
+            contexts.append(episodes[i]['response'] + ' ' + episodes[i]['query'])
+    else:
+        for episode in episodes:
+            if add_response:
+                episode['text'].append(episode['response'])
+            tmp = ' '.join(episode['text'])
+            contexts.append(tmp)
 
-        # tmp = ' '.join(episode['text'])
-        contexts.append(episode['response'])
     with open(vocab_file, 'rb') as f:
         vocab = pkl.load(f)
-    breakpoint()
     sp = Preprocessing(contexts, "english", vocabulary_size=20000)
     preprocessed_documents_for_bow, unpreprocessed_corpus_for_contextual, _ = sp.preprocess_test(contexts, vocab)
     with open(data_preparation_file, 'rb') as f:
         tp = pkl.load(f)
     tp.contextualized_model = sbert_name
     testing_dataset = tp.transform(unpreprocessed_corpus_for_contextual, preprocessed_documents_for_bow)
-    for n_comp in [4, 8, 16]:
+    for n_comp in [9, 18]:
         ctm = CombinedTM(bow_size=20000, contextual_size=768, num_epochs=50, n_components=n_comp)
-        ctm.load(model_path_prefix + str(n_comp), epoch=49)
+        base_dir = model_path_prefix + str(n_comp)
+        model_details_folder = [entry for entry in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, entry))]
+        assert len(model_details_folder) == 1, f"{model_details_folder}"
+        ctm.load(model_path_prefix + str(n_comp) + f"/{model_details_folder[0]}", epoch=49)
+        ctm.num_data_loader_workers = 2
+        ctm.USE_CUDA = True
         predictions = ctm.get_doc_topic_distribution(testing_dataset, n_samples=10)
         if onehot:
             predictions = np.argmax(predictions, axis=1)

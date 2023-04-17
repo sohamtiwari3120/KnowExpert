@@ -1,14 +1,36 @@
 echo "Inference with both dialogue history and response"
 
+# python train_ctm.py \
+# --do_eval_dial \
+# --dataset wow \
+# --vocab_path save/models/topic_models/ctm_new_vocab_20k.pkl \
+# --data_preparation_file save/models/topic_models/data_cache.pkl \
+# --model_path_prefix save/models/topic_models/ctm_20k_topics_ \
+# --output_path save/models/topic_models/ctm_20k_new_hisres_NCLUSTER/wow_20k_new_hisres_ \
+# --sbert_name sentence-transformers/stsb-roberta-base-v2 \
+# --hisres
+
+# python train_ctm.py \
+# --do_eval_dial \
+# --dataset wow \
+# --vocab_path save/models/mlqa_topic_models/french_vietnamese/ctm_new_vocab_20k.pkl \
+# --data_preparation_file save/models/topic_models/data_cache.pkl \
+# --model_path_prefix save/models/topic_models/ctm_20k_topics_ \
+# --output_path save/models/topic_models/ctm_20k_new_hisres_NCLUSTER/wow_20k_new_hisres_ \
+# --sbert_name sentence-transformers/stsb-roberta-base-v2 \
+# --hisres
+
 python train_ctm.py \
 --do_eval_dial \
---dataset wow \
+--dataset mlqa \
 --vocab_path save/models/mlqa_topic_models/french_vietnamese/ctm_new_vocab_20k.pkl \
---data_preparation_file save/models/topic_models/data_cache.pkl \
---model_path_prefix save/models/topic_models/ctm_20k_topics_ \
---output_path save/models/topic_models/ctm_20k_new_hisres_NCLUSTER/wow_20k_new_hisres_ \
---sbert_name sentence-transformers/stsb-roberta-base-v2 \
---hisres
+--data_preparation_file save/models/mlqa_topic_models/french_vietnamese/data_cache.pkl \
+--model_path_prefix save/models/mlqa_topic_models/french_vietnamese/ctm_20k_topics_ \
+--output_path save/models/mlqa_topic_models/french_vietnamese/ctm_20k_new_hisres_NCLUSTER/mlqa_20k_new_hisres_ \
+--sbert_name setu4993/LaBSE \
+--hisres \
+--use_mlqa \
+--languages french vietnamese
 
 
 # python train_ctm.py \

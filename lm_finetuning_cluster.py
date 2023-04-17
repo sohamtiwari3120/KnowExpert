@@ -34,7 +34,7 @@ def main(args):
     np.random.seed(seed)
     random.seed(seed)	
 
-    tokenizer = AutoTokenizer.from_pretrained(args.tok)	
+    tokenizer = AutoTokenizer.from_pretrained(args.tok)	# gpt 2 tokenizer being passed in shells script / by default
 
     config = AutoConfig.from_pretrained(args.pretrained_model)
     config.kadapter = args.kadapter
@@ -51,7 +51,7 @@ def main(args):
     # prepare data
     data, topics = getClusters(args.doc_path, args.cluster_path, args.index, data_dir=args.data_dir, \
                 load_cmu=args.load_cmu, cmu_doc=args.cmu_doc, cmu_path=args.cmu_path, topic_modeling=args.tm, \
-                load_topic=args.load_topic, topic_path=args.topic_path, cmu_topic_path=args.cmu_topic_path)
+                load_topic=args.load_topic, topic_path=args.topic_path, cmu_topic_path=args.cmu_topic_path, use_mlqa=args.use_mlqa, languages=args.languages)
     
     if args.load_wiki:
         wiki_data, wiki_topics = getWikiClusters(args.wiki_path, args.index)
@@ -92,6 +92,8 @@ def main(args):
             max_length=args.max_length,
             model_type=args.model_type,
             perm_times=args.perm_times,
+            dataset = "mlqa" if args.use_mlqa else "wow",
+            data_dir = args.data_dir
             )
     elif args.mlm:
         dataset = DocReader(
@@ -237,7 +239,7 @@ def main(args):
                 tr_loss = 0.0	
         
         if args.tm:
-            if (epoch+1) % 10 == 0:
+            if (epoch+1) % 1 == 0:
                 save_adapter(args, tokenizer, model, optimizer, scheduler, epoch)	
         else:
             save_model(args, tokenizer, model, optimizer, scheduler, epoch)	
@@ -273,7 +275,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)	
 
     parser.add_argument('--data_dir', type=str, default="")	
-    parser.add_argument('--tm', type=bool, default=False)
+    parser.add_argument('--tm', type=bool, default=False, help="Use topic modelling") #NOTE ??
     parser.add_argument('--doc_path', type=str, default="./data/wiki_articles.txt")	
     parser.add_argument('--cluster_path', type=str, default=None)	
     parser.add_argument("--index", type=int, default=0)	
@@ -309,6 +311,8 @@ if __name__ == "__main__":
     parser.add_argument('--cmu_topic_path', type=str, default="./data/cmu_dog_topics.json")
     parser.add_argument("--perm_times", type=int, default=10)	
 
+    parser.add_argument('--use_mlqa', action="store_true")
+    parser.add_argument("-l", '--languages', nargs='+', default=["english", "chinese", "french", "vietnamese"])
     parser.add_argument('--load_wiki', action="store_true")
     parser.add_argument('--load_half_wow', action="store_true")
     parser.add_argument('--wiki_path', type=str, default="./data/sample_wiki_10/wiki_sample10_cluster8_idxNUM.txt")		

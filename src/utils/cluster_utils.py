@@ -15,10 +15,21 @@ from torch.utils.data import Dataset, DataLoader
 
 logger = logging.getLogger(__name__)
 
+def load_mlqa_docs(data_path, languages):
+    documents = []
+    if "french" in languages:
+        documents += json.load(open(os.path.join(data_path, "fr.json"), "r"))
+    if "vietnamese" in languages:
+        documents += json.load(open(os.path.join(data_path, "vi.json"), "r"))
+    if "english" in languages:
+        documents += json.load(open(os.path.join(data_path, "en.json"), "r"))
+    if "chinese" in languages:
+        documents += json.load(open(os.path.join(data_path, "zh.json"), "r"))
+    return documents
 
 def getClusters(doc_path, cluster_path, cluster_ind, data_dir="", \
     load_cmu=False, cmu_doc="", cmu_path="", topic_modeling=True, \
-    load_topic=False, topic_path="", cmu_topic_path=""):
+    load_topic=False, topic_path="", cmu_topic_path="", use_mlqa=False, languages=[]):
 
     # if not topic_modeling:
     #     logger.info("Using Topic Cluster...")
@@ -26,13 +37,17 @@ def getClusters(doc_path, cluster_path, cluster_ind, data_dir="", \
     #     return cluster.get_topic_data(index=args.index)
 
     # Load the data
-    with open(doc_path, "r") as f:
-        wow_data = f.readlines()
-    
+    if use_mlqa:
+        wow_data = load_mlqa_docs(os.path.join(data_dir, "all_passages"), languages)
+    else:
+        with open(doc_path, "r") as f:
+            wow_data = f.readlines()
+        
     # load the topic if needed
     if load_topic:
-        with open(topic_path, "r") as f:
-            topics = json.load(f)
+        if not use_mlqa:
+            with open(topic_path, "r") as f:
+                topics = json.load(f)
 
     if load_cmu:
         with open(cmu_doc, "r") as f:
@@ -51,10 +66,14 @@ def getClusters(doc_path, cluster_path, cluster_ind, data_dir="", \
     selected = []
     selected_topics = []
     for ind, line in enumerate(wow_data):
-        if cluster[ind] == cluster_ind:
+        if np.argmax(cluster[ind]) == cluster_ind:
             selected.append(line.strip())
             if load_topic:
-                selected_topics.append(topics[ind])
+                if use_mlqa:
+                    topic = line.split('//')[-1].strip().split('-')[-1].strip()
+                    selected_topics.append(topic)
+                else:
+                    selected_topics.append(topics[ind])
     
     if load_cmu:
         with open(cmu_path, "rb") as f:

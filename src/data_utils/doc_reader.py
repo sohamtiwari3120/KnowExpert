@@ -14,7 +14,7 @@ import transformers
 from transformers import AutoTokenizer, AutoModel
 
 from src.data_utils.utils import pad_sents, get_mask, pad_list_of_sents, get_list_of_mask
-from src.data_utils.masking import split_span_masking
+# from src.data_utils.masking import split_span_masking
 
 import matplotlib.pyplot as plt
 
@@ -152,125 +152,125 @@ class DocReader(Dataset):
         return raw_data
 
 
-class MaskedDocReader(DocReader):
-    def __init__(self,
-                 data,
-                 tokenizer,
-                 dataset: str = "wow",
-                 mode: str = "full",
-                 max_length: int = 512,
-                 data_dir: str = "./data",
-                 model_type: str = "gpt2",
-                 entity_spans: list = [],
-                 time_spans: list = [],
-                 random_masking: bool = True,
-                 random_only: bool = False,
-                 mask_ratio: float = 0.3,
-                 scale: int = 10,
-                 percent: float = 0.8,
-                 **kwargs
-                 ):
-        self._mode = mode   # 
-        self._max_length = max_length
-        self._data_dir = data_dir
-        self._model_type = model_type
-        self._tokenizer = tokenizer
+# class MaskedDocReader(DocReader):
+#     def __init__(self,
+#                  data,
+#                  tokenizer,
+#                  dataset: str = "wow",
+#                  mode: str = "full",
+#                  max_length: int = 512,
+#                  data_dir: str = "./data",
+#                  model_type: str = "gpt2",
+#                  entity_spans: list = [],
+#                  time_spans: list = [],
+#                  random_masking: bool = True,
+#                  random_only: bool = False,
+#                  mask_ratio: float = 0.3,
+#                  scale: int = 10,
+#                  percent: float = 0.8,
+#                  **kwargs
+#                  ):
+#         self._mode = mode   # 
+#         self._max_length = max_length
+#         self._data_dir = data_dir
+#         self._model_type = model_type
+#         self._tokenizer = tokenizer
 
-        self._task = dataset
-        assert self._task == "wow" or self._task == "cmu_dog"
+#         self._task = dataset
+#         assert self._task == "wow" or self._task == "cmu_dog"
 
-        self._entity_spans = entity_spans
-        self._time_spans = time_spans
-        self._random_masking = random_masking
-        self._random_only = random_only
-        self._mask_ratio = mask_ratio
-        self._scale = scale
-        self._percent = percent
+#         self._entity_spans = entity_spans
+#         self._time_spans = time_spans
+#         self._random_masking = random_masking
+#         self._random_only = random_only
+#         self._mask_ratio = mask_ratio
+#         self._scale = scale
+#         self._percent = percent
 
-        # read the datasets and do preprocessing
-        pad_token_id = self._tokenizer.pad_token_id if self._tokenizer.pad_token_id is not None else 0
-        if data is None:
-            data = self.load_doc()
-        masked_data, label = self.preproc_doc(data)
-        self.mask = get_mask(masked_data)
-        self.data, _ = pad_sents(masked_data, pad_token=pad_token_id)
-        self.label_mask = get_mask(label)
-        self.label, _ = pad_sents(label, pad_token=pad_token_id)
-        assert self.data is not None and self.label is not None
+#         # read the datasets and do preprocessing
+#         pad_token_id = self._tokenizer.pad_token_id if self._tokenizer.pad_token_id is not None else 0
+#         if data is None:
+#             data = self.load_doc()
+#         masked_data, label = self.preproc_doc(data)
+#         self.mask = get_mask(masked_data)
+#         self.data, _ = pad_sents(masked_data, pad_token=pad_token_id)
+#         self.label_mask = get_mask(label)
+#         self.label, _ = pad_sents(label, pad_token=pad_token_id)
+#         assert self.data is not None and self.label is not None
     
-    def __getitem__(self, idx):
-        return torch.tensor(self.data[idx], dtype=torch.long), torch.tensor(self.mask[idx], dtype=torch.long), torch.tensor(self.label[idx], dtype=torch.long), torch.tensor(self.label_mask[idx], dtype=torch.long)
+#     def __getitem__(self, idx):
+#         return torch.tensor(self.data[idx], dtype=torch.long), torch.tensor(self.mask[idx], dtype=torch.long), torch.tensor(self.label[idx], dtype=torch.long), torch.tensor(self.label_mask[idx], dtype=torch.long)
 
-    def preproc_doc(self, raw_data):
-        masked_data, label = [], []
-        intervals = self._split_input(raw_data)
+#     def preproc_doc(self, raw_data):
+#         masked_data, label = [], []
+#         intervals = self._split_input(raw_data)
 
-        assert len(intervals) == len(raw_data)
+#         assert len(intervals) == len(raw_data)
 
-        for ind, (text, interval) in tqdm(enumerate(zip(raw_data, intervals)), desc="Masking",total=len(intervals), ncols=100):
-            text = text.encode("ascii", "ignore")
-            text = text.decode()
+#         for ind, (text, interval) in tqdm(enumerate(zip(raw_data, intervals)), desc="Masking",total=len(intervals), ncols=100):
+#             text = text.encode("ascii", "ignore")
+#             text = text.decode()
 
-            masked_lines, orig_lines = self._span_masking(text, interval, ind)
+#             masked_lines, orig_lines = self._span_masking(text, interval, ind)
 
-            tokenized_masked_lines = []
-            tokenized_lines = []
-            for line, orig_line in zip(masked_lines, orig_lines):
-                tokenized_masked_lines.append(self._tokenizer.encode(line.lower()))
-                tokenized_lines.append(self._tokenizer.encode(orig_line.lower()))
+#             tokenized_masked_lines = []
+#             tokenized_lines = []
+#             for line, orig_line in zip(masked_lines, orig_lines):
+#                 tokenized_masked_lines.append(self._tokenizer.encode(line.lower()))
+#                 tokenized_lines.append(self._tokenizer.encode(orig_line.lower()))
 
-            masked_data.extend(tokenized_masked_lines)
-            label.extend(tokenized_lines)
-        return masked_data, label
+#             masked_data.extend(tokenized_masked_lines)
+#             label.extend(tokenized_lines)
+#         return masked_data, label
     
-    def _split_input(self, raw_data):
-        """
-        split the documents by the length after tokenization
-        return ```split_data```: a list of [list of splited sentences]
-        """
-        intervals = []
-        split_data = [] 
+#     def _split_input(self, raw_data):
+#         """
+#         split the documents by the length after tokenization
+#         return ```split_data```: a list of [list of splited sentences]
+#         """
+#         intervals = []
+#         split_data = [] 
 
-        diff = []
-        for text in tqdm(raw_data,desc="Spliting",total=len(raw_data), ncols=100):
-            text = text.encode("ascii", "ignore")
-            text = text.decode()
+#         diff = []
+#         for text in tqdm(raw_data,desc="Spliting",total=len(raw_data), ncols=100):
+#             text = text.encode("ascii", "ignore")
+#             text = text.decode()
 
-            split_line = []
-            tokenized_text = self._tokenizer.convert_tokens_to_ids(self._tokenizer.tokenize(text.lower()))   # TODO test lower case
-            iter_num = len(tokenized_text) // (self._max_length-2)
+#             split_line = []
+#             tokenized_text = self._tokenizer.convert_tokens_to_ids(self._tokenizer.tokenize(text.lower()))   # TODO test lower case
+#             iter_num = len(tokenized_text) // (self._max_length-2)
 
-            for i in range(0, iter_num):  # Truncate in block of max length
-                split_line.append(self._tokenizer.decode(tokenized_text[i*(self._max_length-2) : (i + 1) * (self._max_length-2)]))
-            if len(tokenized_text) - iter_num * (self._max_length-2) > 0:
-                n = iter_num
-                split_line.append(self._tokenizer.decode(tokenized_text[n * (self._max_length-2):]))
+#             for i in range(0, iter_num):  # Truncate in block of max length
+#                 split_line.append(self._tokenizer.decode(tokenized_text[i*(self._max_length-2) : (i + 1) * (self._max_length-2)]))
+#             if len(tokenized_text) - iter_num * (self._max_length-2) > 0:
+#                 n = iter_num
+#                 split_line.append(self._tokenizer.decode(tokenized_text[n * (self._max_length-2):]))
 
-            split_data.append(split_line)
+#             split_data.append(split_line)
 
-        for text, split_line in zip(raw_data, split_data):
-            new_line = " ".join(split_line)
-            orig_len = len(text)
-            new_len = len(new_line)
+#         for text, split_line in zip(raw_data, split_data):
+#             new_line = " ".join(split_line)
+#             orig_len = len(text)
+#             new_len = len(new_line)
 
-            interval = []
-            for ind, line in enumerate(split_line):
-                span_len = int(len(line)/new_len*orig_len)
-                if ind == 0:
-                    start = 0
-                else:
-                    start = int((len(" ".join(split_line[:ind]))+1)/new_len*orig_len)
-                end = start + span_len + 1
-                interval.append([start, end])
+#             interval = []
+#             for ind, line in enumerate(split_line):
+#                 span_len = int(len(line)/new_len*orig_len)
+#                 if ind == 0:
+#                     start = 0
+#                 else:
+#                     start = int((len(" ".join(split_line[:ind]))+1)/new_len*orig_len)
+#                 end = start + span_len + 1
+#                 interval.append([start, end])
                     
-            intervals.append(interval)
-        return intervals
+#             intervals.append(interval)
+#         return intervals
     
-    def _span_masking(self, doc, spans, ind):
-        mask_token = self._tokenizer.mask_token
-        masked_lines, orig_lines = split_span_masking(doc, spans, self._entity_spans[ind], self._time_spans[ind], mask_token=self._tokenizer.mask_token, random_masking=self._random_masking, \
-            random_only=self._random_only, mask_ratio=self._mask_ratio, scale=self._scale, percent=self._percent)
-        return masked_lines, orig_lines
+#     def _span_masking(self, doc, spans, ind):
+#         mask_token = self._tokenizer.mask_token
+#         masked_lines, orig_lines = split_span_masking(doc, spans, self._entity_spans[ind], self._time_spans[ind], mask_token=self._tokenizer.mask_token, random_masking=self._random_masking, \
+#             random_only=self._random_only, mask_ratio=self._mask_ratio, scale=self._scale, percent=self._percent)
+#         return masked_lines, orig_lines
 
 
 class DialOrientDocReader(Dataset):
@@ -295,7 +295,7 @@ class DialOrientDocReader(Dataset):
         self._perm_times = perm_times
 
         self._task = dataset
-        assert self._task == "wow" or self._task == "cmu_dog"
+        assert self._task == "wow" or self._task == "cmu_dog" or self._task == "mlqa"
 
         # read the datasets and do preprocessing
         pad_token_id = self._tokenizer.pad_token_id if self._tokenizer.pad_token_id is not None else 0  # for GPT2 model, it will just be 0
